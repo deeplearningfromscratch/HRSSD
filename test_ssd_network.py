@@ -66,11 +66,12 @@ def process_image(img, select_threshold=0.5, nms_threshold=.45, net_shape=(300, 
     return rclasses, rscores, rbboxes
 
 
+
 # Test on some demo image and visualize output.
 path = 'demo/'
 image_names = sorted(os.listdir(path))
 
-img = mpimg.imread(path + image_names[1])
+img = mpimg.imread(path + image_names[-1])
 rclasses, rscores, rbboxes = process_image(img)
 
 # visualization.bboxes_draw_on_img(img, rclasses, rscores, rbboxes, visualization.colors_plasma)

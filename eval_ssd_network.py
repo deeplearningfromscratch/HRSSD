@@ -119,11 +119,21 @@ def main(_):
 
         # Get the SSD network and its anchors.
         ssd_class = nets_factory.get_network(FLAGS.model_name)
-        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes)
+        ssd_net_base = ssd_class(ssd_class.default_params)
+        ssd_anchors_base = ssd_net_base.anchors((512, 512))
+        ssd_shape = (1024, 1024)
+        feat_shapes = [(128, 128), (64, 64), (32, 32), (16, 16)]
+        feat_layers = ['block4',
+                       'block7',
+                       'block8',
+                       'block9']
+        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes, img_shape=ssd_shape,
+                                                       feat_shapes=feat_shapes, feat_layers=feat_layers)
         ssd_net = ssd_class(ssd_params)
 
         # Evaluation shape and associated anchors: eval_image_size
-        ssd_shape = ssd_net.params.img_shape
+        # ssd_shape = ssd_net.params.img_shape
+
         ssd_anchors = ssd_net.anchors(ssd_shape)
 
         # Select the preprocessing function.
@@ -160,6 +170,13 @@ def main(_):
                                        resize=FLAGS.eval_resize,
                                        difficults=None)
 
+            # image_base, glabels, gbboxes, gbbox_img = \
+            #     image_preprocessing_fn(image, glabels, gbboxes,
+            #                            out_shape=(512,512),
+            #                            data_format=DATA_FORMAT,
+            #                            resize=FLAGS.eval_resize,
+            #                            difficults=None)
+
             # Encode groundtruth labels and bboxes.
             gclasses, glocalisations, gscores = \
                 ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
@@ -180,10 +197,21 @@ def main(_):
         # SSD Network + Ouputs decoding.
         # =================================================================== #
         dict_metrics = {}
+
         arg_scope = ssd_net.arg_scope(data_format=DATA_FORMAT)
         with slim.arg_scope(arg_scope):
             predictions, localisations, logits, end_points = \
-                ssd_net.net(b_image, is_training=False)
+                ssd_net.net(b_image, is_training=False, reuse=tf.AUTO_REUSE)
+
+        # predictions = predictions[:-2]
+        # localisations = localisations[:-2]
+
+        # with slim.arg_scope(arg_scope):
+        #     predictions, localisations, logits, end_points = \
+        #         ssd_net_base.net(b_image_base, is_training=False, reuse=tf.AUTO_REUSE)
+
+        # predictions = predictions + predictions1
+
         # Add losses functions.
         ssd_net.losses(logits, localisations,
                        b_gclasses, b_glocalisations, b_gscores)
@@ -192,6 +220,8 @@ def main(_):
         with tf.device('/device:CPU:0'):
             # Detected objects from SSD output.
             localisations = ssd_net.bboxes_decode(localisations, ssd_anchors)
+            # localisations = ssd_net_base.bboxes_decode(localisations, ssd_anchors_base)
+            # localisations = localisations1 + localisations
             rscores, rbboxes = \
                 ssd_net.detected_bboxes(predictions, localisations,
                                         select_threshold=FLAGS.select_threshold,

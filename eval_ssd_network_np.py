@@ -193,7 +193,7 @@ def main(_):
         # Performing post-processing on CPU: loop-intensive, usually more efficient.
         with tf.device('/device:CPU:0'):
             # Detected objects from SSD output.
-            rscores, rbboxes = tf.py_func(py_postprocess, [predictions, localisations, ssd_anchors, net_shape, gbbox_img])
+            rscores, rbboxes = tf.py_func(py_postprocess, [predictions, localisations, ssd_anchors, net_shape, gbbox_img], [tf.float32])
 
             # Compute TP and FP statistics.
             num_gbboxes, tp, fp, rscores = \

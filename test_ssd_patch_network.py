@@ -69,7 +69,7 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
     bboxes = []
     isess = tf.InteractiveSession(config=config)
 
-    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((300, 300), isess)
+    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((512, 512), isess)
     rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
                                                               feed_dict={img_input: img})
 
@@ -86,7 +86,7 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
 
     for img, crop_area in zip(img_patches, crop_areas):
         img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((512, 512), isess,
-                                                                                           num_use=-4)
+                                                                                           num_use=-3)
         rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
                                                                   feed_dict={img_input: img})
 
@@ -102,20 +102,6 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
         classes.append(rclasses)
         scores.append(rscores)
         bboxes.append(rbboxes)
-
-    # rclasses = np.concatenate(classes)
-    # rscores = np.concatenate(scores)
-    # rbboxes = np.concatenate(bboxes)
-    #
-    # rbboxes = np_methods.bboxes_clip(rbbox_img, rbboxes)
-    # rclasses, rscores, rbboxes = np_methods.bboxes_sort(rclasses, rscores, rbboxes, top_k=400)
-    # rclasses, rscores, rbboxes = np_methods.bboxes_nms(rclasses, rscores, rbboxes, nms_threshold=nms_threshold)
-    # # Resize bboxes to original image shape. Note: useless for Resize.WARP!
-    # rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
-
-    # classes = np.concatenate(classes)
-    # scores = np.concatenate(scores)
-    # bboxes = np.concatenate(bboxes)
 
     cut_outs = list(np_methods.cut_tensor_by_thresholding(classes, scores, bboxes, filter_threshold=0.7))
 
@@ -136,7 +122,7 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
     # return classes, scores, bboxes
     # box_merging logic
     patch_areas = np_methods.get_normalized_patch_areas(input_shape, crop_areas)
-    rclasses, rscores, rbboxes = np_methods.splitted_bboxes_nms(classes, scores, bboxes, patch_areas, nms_threshold=0.23)
+    rclasses, rscores, rbboxes = np_methods.splitted_bboxes_nms(classes, scores, bboxes, patch_areas, nms_threshold=0.15)
 
     return rclasses, rscores, rbboxes
 
@@ -146,7 +132,7 @@ path = 'demo/'
 image_names = sorted(os.listdir(path))
 print(image_names)
 
-img = mpimg.imread(path + image_names[-10])
+img = mpimg.imread(path + image_names[3])
 rclasses, rscores, rbboxes = process_image_non_patch(img)
 
 # visualization.bboxes_draw_on_img(img, rclasses, rscores, rbboxes, visualization.colors_plasma)

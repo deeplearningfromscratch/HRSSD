@@ -55,13 +55,26 @@ def inference(net_shape, isess, num_use=None):
 
 
 # Main image processing routine.
-def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_shape=(300, 300)):
+def process_image_non_patch(img, select_threshold=0.55, nms_threshold=.45, net_shape=(300, 300)):
     # Run SSD network.
     classes = []
     scores = []
     bboxes = []
     isess = tf.InteractiveSession(config=config)
-    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((720, 1280), isess, num_use=-2)
+
+    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((512, 512), isess)
+    rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
+                                                              feed_dict={img_input: img})
+
+    # Get classes and bboxes from the net outputs.
+    rclasses, rscores, rbboxes = np_methods.ssd_bboxes_select(
+        rpredictions, rlocalisations, ssd_anchors,
+        select_threshold=select_threshold, img_shape=net_shape, num_classes=21, decode=True)
+    classes.append(rclasses)
+    scores.append(rscores)
+    bboxes.append(rbboxes)
+
+    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((2048, 2048), isess, num_use=-3)
     rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
                                                               feed_dict={img_input: img})
 
@@ -72,18 +85,6 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
 
     rbboxes = np_methods.bboxes_clip(rbbox_img, rbboxes)
 
-    classes.append(rclasses)
-    scores.append(rscores)
-    bboxes.append(rbboxes)
-
-    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((300, 300), isess)
-    rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
-                                                              feed_dict={img_input: img})
-
-    # Get classes and bboxes from the net outputs.
-    rclasses, rscores, rbboxes = np_methods.ssd_bboxes_select(
-        rpredictions, rlocalisations, ssd_anchors,
-        select_threshold=select_threshold, img_shape=net_shape, num_classes=21, decode=True)
     classes.append(rclasses)
     scores.append(rscores)
     bboxes.append(rbboxes)
@@ -101,11 +102,10 @@ def process_image_non_patch(img, select_threshold=0.5, nms_threshold=.45, net_sh
 
 
 # Test on some demo image and visualize output.
-path = 'bdd_img/'
+path = 'demo/'
 image_names = sorted(os.listdir(path))
-print(image_names)
 
-img = mpimg.imread(path + image_names[0])
+img = mpimg.imread(path + image_names[1])
 rclasses, rscores, rbboxes = process_image_non_patch(img)
 
 # visualization.bboxes_draw_on_img(img, rclasses, rscores, rbboxes, visualization.colors_plasma)
