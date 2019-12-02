@@ -86,7 +86,7 @@ def bboxes_draw_on_img(img, classes, scores, bboxes, colors, thickness=2):
 # =========================================================================== #
 # Matplotlib show...
 # =========================================================================== #
-def plt_bboxes(img, classes, scores, bboxes, figsize=(10,10), linewidth=1.5):
+def plt_bboxes(img, classes, scores, bboxes, figsize=(10,10), linewidth=1.5, demo=True):
     """Visualize bounding boxes. Largely inspired by SSD-MXNET!
     """
     fig = plt.figure(figsize=figsize)
@@ -94,26 +94,44 @@ def plt_bboxes(img, classes, scores, bboxes, figsize=(10,10), linewidth=1.5):
     height = img.shape[0]
     width = img.shape[1]
     colors = dict()
-    for i in range(classes.shape[0]):
-        cls_id = int(classes[i])
-        if cls_id >= 0:
-            score = scores[i]
-            if cls_id not in colors:
-                colors[cls_id] = (random.random(), random.random(), random.random())
-            ymin = int(bboxes[i, 0] * height)
-            xmin = int(bboxes[i, 1] * width)
-            ymax = int(bboxes[i, 2] * height)
-            xmax = int(bboxes[i, 3] * width)
-            rect = plt.Rectangle((xmin, ymin), xmax - xmin,
-                                 ymax - ymin, fill=False,
-                                 edgecolor=colors[cls_id],
-                                 linewidth=linewidth)
-            plt.gca().add_patch(rect)
-            class_name = str(cls_id)
-            plt.gca().text(xmin, ymin - 2,
-                           '{:s} | {:.3f}'.format(class_name, score),
-                           bbox=dict(facecolor=colors[cls_id], alpha=0.5),
-                           fontsize=12, color='white')
+    if demo is not True:
+        for i in range(classes.shape[0]):
+            cls_id = int(classes[i])
+            if cls_id >= 0:
+                score = scores[i]
+                if cls_id not in colors:
+                    colors[cls_id] = (random.random(), random.random(), random.random())
+                ymin = int(bboxes[i, 0] * height)
+                xmin = int(bboxes[i, 1] * width)
+                ymax = int(bboxes[i, 2] * height)
+                xmax = int(bboxes[i, 3] * width)
+                rect = plt.Rectangle((xmin, ymin), xmax - xmin,
+                                     ymax - ymin, fill=False,
+                                     edgecolor=colors[cls_id],
+                                     linewidth=linewidth)
+                plt.gca().add_patch(rect)
+                class_name = str(cls_id)
+                plt.gca().text(xmin, ymin - 2,
+                               '{:s} | {:.3f}'.format(class_name, score),
+                               bbox=dict(facecolor=colors[cls_id], alpha=0.5),
+                               fontsize=12, color='white')
+    else:
+        for i in range(classes.shape[0]):
+            cls_id = int(classes[i])
+            if cls_id >= 0:
+                score = scores[i]
+                if cls_id not in colors:
+                    colors[cls_id] = (1, 0, 0)
+                ymin = int(bboxes[i, 0] * height)
+                xmin = int(bboxes[i, 1] * width)
+                ymax = int(bboxes[i, 2] * height)
+                xmax = int(bboxes[i, 3] * width)
+                rect = plt.Rectangle((xmin, ymin), xmax - xmin,
+                                     ymax - ymin, fill=False,
+                                     edgecolor=colors[cls_id],
+                                     linewidth=linewidth)
+                plt.gca().add_patch(rect)
+                plt.savefig('demo.png')
     plt.show()
 
 def plt_bboxes_tf(img, scores, bboxes, figsize=(10, 10), linewidth=1.5):
