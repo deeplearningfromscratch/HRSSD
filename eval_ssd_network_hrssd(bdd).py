@@ -43,7 +43,7 @@ DATA_FORMAT = 'NHWC'
 # SSD evaluation Flags.
 # =========================================================================== #
 tf.app.flags.DEFINE_float(
-    'select_threshold', 0.5, 'Selection threshold.')
+    'select_threshold', 0.01, 'Selection threshold.')
 tf.app.flags.DEFINE_integer(
     'select_top_k', 400, 'Select top-k detected bounding boxes.')
 tf.app.flags.DEFINE_integer(
@@ -72,7 +72,7 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_string(
     'master', '', 'The address of the TensorFlow master to use.')
 tf.app.flags.DEFINE_string(
-    'checkpoint_path', 'checkpoints/VGG_VOC0712_SSD_300x300_ft_iter_120000.ckpt',
+    'checkpoint_path', 'checkpoints/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt',
     'The directory where the model was written to or an absolute path to a '
     'checkpoint file.')
 tf.app.flags.DEFINE_string(
@@ -81,13 +81,13 @@ tf.app.flags.DEFINE_integer(
     'num_preprocessing_threads', 4,
     'The number of threads used to create the batches.')
 tf.app.flags.DEFINE_string(
-    'dataset_name', 'pascalvoc_2007', 'The name of the dataset to load.')
+    'dataset_name', 'bdd', 'The name of the dataset to load.')
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'test', 'The name of the train/test split.')
 tf.app.flags.DEFINE_string(
-    'dataset_dir', 'assets/PASCAL_VOC/', 'The directory where the dataset files are stored.')
+    'dataset_dir', 'assets/BDD/', 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_string(
-    'model_name', 'ssd_300_vgg', 'The name of the architecture to evaluate.')
+    'model_name', 'ssd_512_vgg', 'The name of the architecture to evaluate.')
 tf.app.flags.DEFINE_string(
     'preprocessing_name', None, 'The name of the preprocessing to use. If left '
                                 'as `None`, then the model_name flag is used.')
@@ -120,16 +120,20 @@ def main(_):
         # Get the SSD network and its anchors.
         ssd_class = nets_factory.get_network(FLAGS.model_name)
         ssd_net_base = ssd_class(ssd_class.default_params)
-        base_shape = (300, 300)
+        # base_shape = (300, 300)
+        base_shape = (512, 512)
         ssd_anchors_base = ssd_net_base.anchors(base_shape)
 
-        ssd_shape = (1024, 1024)
-        feat_shapes = [(128, 128), (64, 64), (32, 32)]#(64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
+        # ssd_shape = (1024, 1024)
+        # feat_shapes = [(128, 128), (64, 64), (32, 32)]#, (16, 16) ]#(64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
+        ssd_shape = (720, 1280)
+        feat_shapes = [(90, 160), (45, 80), (23, 40)]  # , (16, 16) ]#(64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
         # feat_shapes = [(128, 128), (64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
         feat_layers = ['block4',
                        'block7',
                        'block8',]
-                       # 'block9',
+                       # 'block9']
+                       # 'block9',]
                        # 'block10',
                        # 'block11']
         # ['block4', 'block7', 'block8', 'block9', 'block10', 'block11', 'block12']
@@ -164,10 +168,11 @@ def main(_):
             [image, shape, glabels, gbboxes] = provider.get(['image', 'shape',
                                                              'object/label',
                                                              'object/bbox'])
-            if FLAGS.remove_difficult:
-                [gdifficults] = provider.get(['object/difficult'])
-            else:
-                gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
+            # if FLAGS.remove_difficult:
+            #     [gdifficults] = provider.get(['object/difficult'])
+            # else:
+            #     gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
+            gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
 
             # Pre-processing image, labels and bboxes.
             image, _, _, _ = \
@@ -249,6 +254,7 @@ def main(_):
             localisations = ssd_net.bboxes_decode(localisations, ssd_anchors)
             localisations_b = ssd_net_base.bboxes_decode(localisations_b, ssd_anchors_base)
             localisations += localisations_b
+
             rscores, rbboxes = \
                 ssd_net.detected_bboxes(predictions, localisations,
                                         select_threshold=FLAGS.select_threshold,
@@ -256,6 +262,28 @@ def main(_):
                                         clipping_bbox=None,
                                         top_k=FLAGS.select_top_k,
                                         keep_top_k=FLAGS.keep_top_k)
+
+            for cls in rscores.keys():
+            #     # rscores[cls] = tf.Print(rscores[cls], [rscores[cls]], 'before %d scores' % cls,
+            #     #                         summarize=rscores[cls].shape[1])
+            #     # rbboxes[cls] = tf.Print(rbboxes[cls], [rbboxes[cls]], 'before %d bboxes' % cls,
+            #     #                         summarize=rbboxes[cls].shape[1])
+                labels = [6, 15, 2, 14, 7, 19, 15]
+            #     # if cls not in labels:
+            #     #     rscores[cls] = tf.zeros_like(rscores[cls])
+            #     #     rbboxes[cls] = tf.zeros_like(rbboxes[cls])
+            #
+                if cls not in labels:
+                    rscores[cls] = tf.zeros_like(rscores[cls])
+                    rbboxes[cls] = tf.zeros_like(rbboxes[cls])
+            #         # rscores[cls] = tf.Print(rscores[cls], [rscores[cls]], 'after %d scores' % cls,
+            #         #                         summarize=rscores[cls].shape[1])
+            #         # rbboxes[cls] = tf.Print(rbboxes[cls], [rbboxes[cls]], 'after %d bboxes' % cls,
+            #         #                         summarize=rbboxes[cls].shape[1])
+            #
+            #     # # if cls in labels:
+            #     #     rscores[cls] = tf.Print(rscores[cls], [rscores[cls]], '%d scores' % cls,
+            #     #                             summarize=rscores[cls].shape[1])
 
             # Compute TP and FP statistics.
             num_gbboxes, tp, fp, rscores = \

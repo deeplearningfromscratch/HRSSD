@@ -115,3 +115,31 @@ def plt_bboxes(img, classes, scores, bboxes, figsize=(10,10), linewidth=1.5):
                            bbox=dict(facecolor=colors[cls_id], alpha=0.5),
                            fontsize=12, color='white')
     plt.show()
+
+def plt_bboxes_tf(img, scores, bboxes, figsize=(10, 10), linewidth=1.5):
+    fig = plt.figure(figsize=figsize)
+    plt.imshow(img)
+    height = img.shape[0]
+    width = img.shape[1]
+    colors = dict()
+    for i in range(scores.shape[0]):
+        # cls_id = int(classes[i])
+        # if cls_id >= 0:
+        score = scores[i]
+        # if cls_id not in colors:
+        #     colors[cls_id] = (random.random(), random.random(), random.random())
+        ymin = int(bboxes[i, 0] * height)
+        xmin = int(bboxes[i, 1] * width)
+        ymax = int(bboxes[i, 2] * height)
+        xmax = int(bboxes[i, 3] * width)
+        rect = plt.Rectangle((xmin, ymin), xmax - xmin,
+                             ymax - ymin, fill=False,
+                             edgecolor=None,
+                             linewidth=linewidth)
+        plt.gca().add_patch(rect)
+        # class_name = str(cls_id)
+        plt.gca().text(xmin, ymin - 2,
+                       '{:.3f}'.format(score),
+                       bbox=dict(facecolor=None, alpha=0.5),
+                       fontsize=12, color='white')
+    plt.show()

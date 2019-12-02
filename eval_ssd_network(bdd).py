@@ -43,13 +43,13 @@ DATA_FORMAT = 'NHWC'
 # SSD evaluation Flags.
 # =========================================================================== #
 tf.app.flags.DEFINE_float(
-    'select_threshold', 0.5, 'Selection threshold.')
+    'select_threshold', 0.01, 'Selection threshold.')
 tf.app.flags.DEFINE_integer(
     'select_top_k', 400, 'Select top-k detected bounding boxes.')
 tf.app.flags.DEFINE_integer(
     'keep_top_k', 200, 'Keep top-k detected objects.')
 tf.app.flags.DEFINE_float(
-    'nms_threshold', 0.45, 'Non-Maximum Selection threshold.')
+    'nms_threshold', 0.5, 'Non-Maximum Selection threshold.')
 tf.app.flags.DEFINE_float(
     'matching_threshold', 0.5, 'Matching threshold with groundtruth objects.')
 tf.app.flags.DEFINE_integer(
@@ -65,7 +65,7 @@ tf.app.flags.DEFINE_boolean(
 tf.app.flags.DEFINE_integer(
     'num_classes', 21, 'Number of classes to use in the dataset.')
 tf.app.flags.DEFINE_integer(
-    'batch_size', 8, 'The number of samples in each batch.')
+    'batch_size', 16, 'The number of samples in each batch.')
 tf.app.flags.DEFINE_integer(
     'max_num_batches', None,
     'Max number of batches to evaluate by default use all.')
@@ -81,11 +81,11 @@ tf.app.flags.DEFINE_integer(
     'num_preprocessing_threads', 4,
     'The number of threads used to create the batches.')
 tf.app.flags.DEFINE_string(
-    'dataset_name', 'pascalvoc_2007', 'The name of the dataset to load.')
+    'dataset_name', 'bdd', 'The name of the dataset to load.')
 tf.app.flags.DEFINE_string(
     'dataset_split_name', 'test', 'The name of the train/test split.')
 tf.app.flags.DEFINE_string(
-    'dataset_dir', 'assets/PASCAL_VOC/', 'The directory where the dataset files are stored.')
+    'dataset_dir', 'assets/BDD/', 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_string(
     'model_name', 'ssd_300_vgg', 'The name of the architecture to evaluate.')
 tf.app.flags.DEFINE_string(
@@ -96,13 +96,13 @@ tf.app.flags.DEFINE_float(
     'The decay to use for the moving average.'
     'If left as None, then moving averages are not used.')
 tf.app.flags.DEFINE_float(
-    'gpu_memory_fraction', 0.8, 'GPU memory fraction to use.')
+    'gpu_memory_fraction', 0.9, 'GPU memory fraction to use.')
 tf.app.flags.DEFINE_boolean(
     'wait_for_checkpoints', False, 'Wait for new checkpoints in the eval loop.')
 
 FLAGS = tf.app.flags.FLAGS
 
-
+tf.enable_eager_execution()
 def main(_):
     if not FLAGS.dataset_dir:
         raise ValueError('You must supply the dataset directory with --dataset_dir')
@@ -119,29 +119,12 @@ def main(_):
 
         # Get the SSD network and its anchors.
         ssd_class = nets_factory.get_network(FLAGS.model_name)
-        ssd_net_base = ssd_class(ssd_class.default_params)
-        base_shape = (300, 300)
-        ssd_anchors_base = ssd_net_base.anchors(base_shape)
-
-        ssd_shape = (1024, 1024)
-        feat_shapes = [(128, 128), (64, 64), (32, 32)]#(64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
-        # feat_shapes = [(128, 128), (64, 64), (32, 32), (16, 16), (14, 14), (12, 12)]
-        feat_layers = ['block4',
-                       'block7',
-                       'block8',]
-                       # 'block9',
-                       # 'block10',
-                       # 'block11']
-        # ['block4', 'block7', 'block8', 'block9', 'block10', 'block11', 'block12']
-        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes, img_shape=ssd_shape,
-                                                       feat_shapes=feat_shapes, feat_layers=feat_layers)
+        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes)
         ssd_net = ssd_class(ssd_params)
-        ssd_anchors = ssd_net.anchors(ssd_shape)
 
         # Evaluation shape and associated anchors: eval_image_size
-        # ssd_shape = ssd_net.params.img_shape
-
-
+        ssd_shape = ssd_net.params.img_shape
+        ssd_anchors = ssd_net.anchors(ssd_shape)
 
         # Select the preprocessing function.
         preprocessing_name = FLAGS.preprocessing_name or FLAGS.model_name
@@ -164,91 +147,52 @@ def main(_):
             [image, shape, glabels, gbboxes] = provider.get(['image', 'shape',
                                                              'object/label',
                                                              'object/bbox'])
-            if FLAGS.remove_difficult:
-                [gdifficults] = provider.get(['object/difficult'])
-            else:
-                gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
+
+            # if FLAGS.remove_difficult:
+            #     [gdifficults] = provider.get(['object/difficult'])
+            # else:
+            gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
 
             # Pre-processing image, labels and bboxes.
-            image, _, _, _ = \
-                image_preprocessing_fn(image, None, None,
+            image, glabels, gbboxes, gbbox_img = \
+                image_preprocessing_fn(image, glabels, gbboxes,
                                        out_shape=ssd_shape,
                                        data_format=DATA_FORMAT,
                                        resize=FLAGS.eval_resize,
                                        difficults=None)
 
-            # image, glabels, gbboxes, gbbox_img = \
-            #     image_preprocessing_fn(image, glabels, gbboxes,
-            #                            out_shape=base_shape,
-            #                            data_format=DATA_FORMAT,
-            #                            resize=FLAGS.eval_resize,
-            #                            difficults=None)
-
-            image_b, glabels_b, gbboxes_b, gbbox_img_b = \
-                image_preprocessing_fn(image, glabels, gbboxes,
-                                       out_shape=base_shape,
-                                       data_format=DATA_FORMAT,
-                                       resize=FLAGS.eval_resize,
-                                       difficults=None)
-
             # Encode groundtruth labels and bboxes.
-            # gclasses_b, glocalisations_b, gscores_b = \
-            #     ssd_net.bboxes_encode(glabels_b, gbboxes_b, ssd_anchors_base)
-            batch_shape = [1] * 5
-
-            # gclasses += gclasses_b
-            # glocalisations += glocalisations_b
-            # gscores += gscores_b
-
-            # gclasses = gclasses_b
-            # glocalisations = glocalisations_b
-            # gscores = gscores_b
-
-            # glabels = glabels_b
-            # gbboxes = gbboxes_b
+            gclasses, glocalisations, gscores = \
+                ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
+            batch_shape = [1] * 5 + [len(ssd_anchors)] * 3
 
             # Evaluation batch.
             r = tf.train.batch(
-                tf_utils.reshape_list([image, image_b, glabels, gbboxes, gdifficults]),
+                tf_utils.reshape_list([image, glabels, gbboxes, gdifficults, gbbox_img,
+                                       gclasses, glocalisations, gscores]),
                 batch_size=FLAGS.batch_size,
                 num_threads=FLAGS.num_preprocessing_threads,
                 capacity=5 * FLAGS.batch_size,
                 dynamic_pad=True)
-            (b_image, b_image_b, b_glabels, b_gbboxes, b_gdifficults) = tf_utils.reshape_list(r, batch_shape)
-            # r = tf.train.batch(
-            #     tf_utils.reshape_list([image_b]),
-            #     batch_size=FLAGS.batch_size,
-            #     num_threads=FLAGS.num_preprocessing_threads,
-            #     capacity=5 * FLAGS.batch_size,
-            #     dynamic_pad=True)
-            # (b_image_b) = tf_utils.reshape_list(r, batch_shape)
+            (b_image, b_glabels, b_gbboxes, b_gdifficults, b_gbbox_img, b_gclasses,
+             b_glocalisations, b_gscores) = tf_utils.reshape_list(r, batch_shape)
 
         # =================================================================== #
         # SSD Network + Ouputs decoding.
         # =================================================================== #
         dict_metrics = {}
-
         arg_scope = ssd_net.arg_scope(data_format=DATA_FORMAT)
         with slim.arg_scope(arg_scope):
             predictions, localisations, logits, end_points = \
-                ssd_net.net(b_image, is_training=False, reuse=tf.AUTO_REUSE)
-
-        with slim.arg_scope(arg_scope):
-            predictions_b, localisations_b, logits, end_points = \
-                ssd_net_base.net(b_image_b, is_training=False, reuse=tf.AUTO_REUSE)
-
-        predictions += predictions_b
-
+                ssd_net.net(b_image, is_training=False)
         # Add losses functions.
-        # ssd_net.losses(logits, localisations,
-        #                b_gclasses, b_glocalisations, b_gscores)
+        ssd_net.losses(logits, localisations,
+                       b_gclasses, b_glocalisations, b_gscores)
 
         # Performing post-processing on CPU: loop-intensive, usually more efficient.
         with tf.device('/device:CPU:0'):
             # Detected objects from SSD output.
             localisations = ssd_net.bboxes_decode(localisations, ssd_anchors)
-            localisations_b = ssd_net_base.bboxes_decode(localisations_b, ssd_anchors_base)
-            localisations += localisations_b
             rscores, rbboxes = \
                 ssd_net.detected_bboxes(predictions, localisations,
                                         select_threshold=FLAGS.select_threshold,
@@ -256,7 +200,6 @@ def main(_):
                                         clipping_bbox=None,
                                         top_k=FLAGS.select_top_k,
                                         keep_top_k=FLAGS.keep_top_k)
-
             # Compute TP and FP statistics.
             num_gbboxes, tp, fp, rscores = \
                 tfe.bboxes_matching_batch(rscores.keys(), rscores, rbboxes,
@@ -420,18 +363,6 @@ def main(_):
                 timeout=None)
 
 
+
 if __name__ == '__main__':
     tf.app.run()
-def py_postprocess(rpredictions, rlocalisations, ssd_anchors, net_shape, rbbox_img):
-    from nets import np_methods
-    rclasses, rscores, rbboxes = np_methods.ssd_bboxes_select(
-        rpredictions, rlocalisations, ssd_anchors,
-        select_threshold=FLAGS.select_threshold, img_shape=net_shape, num_classes=21, decode=True)
-
-    rbboxes = np_methods.bboxes_clip(rbbox_img, rbboxes)
-    rclasses, rscores, rbboxes = np_methods.bboxes_sort(rclasses, rscores, rbboxes, top_k=400)
-    rclasses, rscores, rbboxes = np_methods.bboxes_nms(rclasses, rscores, rbboxes, nms_threshold=FLAGS.nms_threshold)
-    # Resize bboxes to original image shape. Note: useless for Resize.WARP!
-    rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
-
-    return rscores, rbboxes

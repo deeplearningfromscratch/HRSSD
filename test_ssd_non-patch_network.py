@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 import sys
-from nets import ssd_vgg_512, ssd_common, np_methods
+from nets import ssd_vgg_512, ssd_common, np_methods, ssd_vgg_300
 from preprocessing import ssd_vgg_preprocessing
 from notebooks import visualization
 
@@ -34,7 +34,7 @@ def inference(net_shape, isess, num_use=None):
     # Define the SSD model.
     reuse = True if 'ssd_net' in locals() else None
     reuse = tf.AUTO_REUSE
-    ssd_net = ssd_vgg_512.SSDNet()
+    ssd_net = ssd_vgg_300.SSDNet()
     with slim.arg_scope(ssd_net.arg_scope(data_format=data_format)):
         predictions, localisations, _, _ = ssd_net.net(image_4d, is_training=False, reuse=reuse)
 
@@ -42,8 +42,8 @@ def inference(net_shape, isess, num_use=None):
     localisations = localisations[:num_use]
     # Restore SSD model.
     # ckpt_filename = 'checkpoints/ssd_300_vgg.ckpt'
-    # ckpt_filename = 'checkpoints/VGG_VOC0712_SSD_300x300_iter_120000.ckpt'
-    ckpt_filename = 'checkpoints/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt'
+    ckpt_filename = 'checkpoints/ssd_300_vgg.ckpt'
+    # ckpt_filename = 'checkpoints/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt'
     isess.run(tf.global_variables_initializer())
     saver = tf.train.Saver()
     saver.restore(isess, ckpt_filename)
@@ -62,7 +62,7 @@ def process_image_non_patch(img, select_threshold=0.55, nms_threshold=.45, net_s
     bboxes = []
     isess = tf.InteractiveSession(config=config)
 
-    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((512, 512), isess)
+    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((300, 300), isess)
     rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
                                                               feed_dict={img_input: img})
 
@@ -74,7 +74,7 @@ def process_image_non_patch(img, select_threshold=0.55, nms_threshold=.45, net_s
     scores.append(rscores)
     bboxes.append(rbboxes)
 
-    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((2048, 2048), isess, num_use=-3)
+    img_input, image_4d, predictions, localisations, bbox_img, ssd_anchors = inference((720, 1280), isess, num_use=-3)
     rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, predictions, localisations, bbox_img],
                                                               feed_dict={img_input: img})
 
@@ -105,7 +105,7 @@ def process_image_non_patch(img, select_threshold=0.55, nms_threshold=.45, net_s
 path = 'demo/'
 image_names = sorted(os.listdir(path))
 
-img = mpimg.imread(path + image_names[1])
+img = mpimg.imread(path + image_names[-11])
 rclasses, rscores, rbboxes = process_image_non_patch(img)
 
 # visualization.bboxes_draw_on_img(img, rclasses, rscores, rbboxes, visualization.colors_plasma)

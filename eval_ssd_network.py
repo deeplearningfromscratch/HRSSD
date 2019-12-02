@@ -43,13 +43,13 @@ DATA_FORMAT = 'NHWC'
 # SSD evaluation Flags.
 # =========================================================================== #
 tf.app.flags.DEFINE_float(
-    'select_threshold', 0.01, 'Selection threshold.')
+    'select_threshold', 0.5, 'Selection threshold.')
 tf.app.flags.DEFINE_integer(
     'select_top_k', 400, 'Select top-k detected bounding boxes.')
 tf.app.flags.DEFINE_integer(
     'keep_top_k', 200, 'Keep top-k detected objects.')
 tf.app.flags.DEFINE_float(
-    'nms_threshold', 0.45, 'Non-Maximum Selection threshold.')
+    'nms_threshold', 0.5, 'Non-Maximum Selection threshold.')
 tf.app.flags.DEFINE_float(
     'matching_threshold', 0.5, 'Matching threshold with groundtruth objects.')
 tf.app.flags.DEFINE_integer(
@@ -72,7 +72,7 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_string(
     'master', '', 'The address of the TensorFlow master to use.')
 tf.app.flags.DEFINE_string(
-    'checkpoint_path', 'checkpoints/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt',
+    'checkpoint_path', 'checkpoints/ssd_300_vgg.ckpt',
     'The directory where the model was written to or an absolute path to a '
     'checkpoint file.')
 tf.app.flags.DEFINE_string(
@@ -87,7 +87,7 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'dataset_dir', 'assets/PASCAL_VOC/', 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_string(
-    'model_name', 'ssd_512_vgg', 'The name of the architecture to evaluate.')
+    'model_name', 'ssd_300_vgg', 'The name of the architecture to evaluate.')
 tf.app.flags.DEFINE_string(
     'preprocessing_name', None, 'The name of the preprocessing to use. If left '
                                 'as `None`, then the model_name flag is used.')
@@ -96,13 +96,13 @@ tf.app.flags.DEFINE_float(
     'The decay to use for the moving average.'
     'If left as None, then moving averages are not used.')
 tf.app.flags.DEFINE_float(
-    'gpu_memory_fraction', 0.1, 'GPU memory fraction to use.')
+    'gpu_memory_fraction', 0.8, 'GPU memory fraction to use.')
 tf.app.flags.DEFINE_boolean(
     'wait_for_checkpoints', False, 'Wait for new checkpoints in the eval loop.')
 
 FLAGS = tf.app.flags.FLAGS
 
-
+tf.enable_eager_execution()
 def main(_):
     if not FLAGS.dataset_dir:
         raise ValueError('You must supply the dataset directory with --dataset_dir')
@@ -119,21 +119,11 @@ def main(_):
 
         # Get the SSD network and its anchors.
         ssd_class = nets_factory.get_network(FLAGS.model_name)
-        ssd_net_base = ssd_class(ssd_class.default_params)
-        ssd_anchors_base = ssd_net_base.anchors((512, 512))
-        ssd_shape = (1024, 1024)
-        feat_shapes = [(128, 128), (64, 64), (32, 32), (16, 16)]
-        feat_layers = ['block4',
-                       'block7',
-                       'block8',
-                       'block9']
-        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes, img_shape=ssd_shape,
-                                                       feat_shapes=feat_shapes, feat_layers=feat_layers)
+        ssd_params = ssd_class.default_params._replace(num_classes=FLAGS.num_classes)
         ssd_net = ssd_class(ssd_params)
 
         # Evaluation shape and associated anchors: eval_image_size
-        # ssd_shape = ssd_net.params.img_shape
-
+        ssd_shape = ssd_net.params.img_shape
         ssd_anchors = ssd_net.anchors(ssd_shape)
 
         # Select the preprocessing function.
@@ -170,13 +160,6 @@ def main(_):
                                        resize=FLAGS.eval_resize,
                                        difficults=None)
 
-            # image_base, glabels, gbboxes, gbbox_img = \
-            #     image_preprocessing_fn(image, glabels, gbboxes,
-            #                            out_shape=(512,512),
-            #                            data_format=DATA_FORMAT,
-            #                            resize=FLAGS.eval_resize,
-            #                            difficults=None)
-
             # Encode groundtruth labels and bboxes.
             gclasses, glocalisations, gscores = \
                 ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
@@ -197,21 +180,10 @@ def main(_):
         # SSD Network + Ouputs decoding.
         # =================================================================== #
         dict_metrics = {}
-
         arg_scope = ssd_net.arg_scope(data_format=DATA_FORMAT)
         with slim.arg_scope(arg_scope):
             predictions, localisations, logits, end_points = \
-                ssd_net.net(b_image, is_training=False, reuse=tf.AUTO_REUSE)
-
-        # predictions = predictions[:-2]
-        # localisations = localisations[:-2]
-
-        # with slim.arg_scope(arg_scope):
-        #     predictions, localisations, logits, end_points = \
-        #         ssd_net_base.net(b_image_base, is_training=False, reuse=tf.AUTO_REUSE)
-
-        # predictions = predictions + predictions1
-
+                ssd_net.net(b_image, is_training=False)
         # Add losses functions.
         ssd_net.losses(logits, localisations,
                        b_gclasses, b_glocalisations, b_gscores)
@@ -220,8 +192,6 @@ def main(_):
         with tf.device('/device:CPU:0'):
             # Detected objects from SSD output.
             localisations = ssd_net.bboxes_decode(localisations, ssd_anchors)
-            # localisations = ssd_net_base.bboxes_decode(localisations, ssd_anchors_base)
-            # localisations = localisations1 + localisations
             rscores, rbboxes = \
                 ssd_net.detected_bboxes(predictions, localisations,
                                         select_threshold=FLAGS.select_threshold,
@@ -390,6 +360,7 @@ def main(_):
                 max_number_of_evaluations=np.inf,
                 session_config=config,
                 timeout=None)
+
 
 
 if __name__ == '__main__':

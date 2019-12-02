@@ -28,9 +28,10 @@ from tensorflow.python.framework import ops
 from datasets import dataset_factory
 from nets import nets_factory
 from preprocessing import preprocessing_factory
+from nets import np_methods
 
 slim = tf.contrib.slim
-
+tf.enable_eager_execution()
 # =========================================================================== #
 # Some default EVAL parameters
 # =========================================================================== #
@@ -72,7 +73,7 @@ tf.app.flags.DEFINE_integer(
 tf.app.flags.DEFINE_string(
     'master', '', 'The address of the TensorFlow master to use.')
 tf.app.flags.DEFINE_string(
-    'checkpoint_path', 'checkpoints/VGG_VOC0712_SSD_512x512_ft_iter_120000.ckpt',
+    'checkpoint_path', 'checkpoints/VGG_VOC0712_SSD_300x300_ft_iter_120000.ckpt',
     'The directory where the model was written to or an absolute path to a '
     'checkpoint file.')
 tf.app.flags.DEFINE_string(
@@ -87,7 +88,7 @@ tf.app.flags.DEFINE_string(
 tf.app.flags.DEFINE_string(
     'dataset_dir', 'assets/PASCAL_VOC/', 'The directory where the dataset files are stored.')
 tf.app.flags.DEFINE_string(
-    'model_name', 'ssd_512_vgg', 'The name of the architecture to evaluate.')
+    'model_name', 'ssd_300_vgg', 'The name of the architecture to evaluate.')
 tf.app.flags.DEFINE_string(
     'preprocessing_name', None, 'The name of the preprocessing to use. If left '
                                 'as `None`, then the model_name flag is used.')
@@ -123,7 +124,7 @@ def main(_):
         ssd_net = ssd_class(ssd_params)
 
         # Evaluation shape and associated anchors: eval_image_size
-        net_shape = (512, 512)
+        net_shape = (300, 300)
         ssd_shape = net_shape
         ssd_anchors = ssd_net.anchors(ssd_shape)
 
@@ -154,208 +155,63 @@ def main(_):
                 gdifficults = tf.zeros(tf.shape(glabels), dtype=tf.int64)
 
             # Pre-processing image, labels and bboxes.
-            image, glabels, gbboxes, gbbox_img = \
+
+            gpu_options = tf.GPUOptions(allow_growth=True)
+            config = tf.ConfigProto(log_device_placement=False, gpu_options=gpu_options)
+            isess = tf.InteractiveSession(config=config)
+
+            net_shape = (300, 300)
+            data_format = 'NHWC'
+            img_input = tf.placeholder(tf.uint8, shape=(None, None, 3))
+
+            image_pre, glabels, gbboxes, gbbox_img = \
                 image_preprocessing_fn(image, glabels, gbboxes,
                                        out_shape=ssd_shape,
                                        data_format=DATA_FORMAT,
                                        resize=FLAGS.eval_resize,
                                        difficults=None)
+            image_4d = tf.expand_dims(image_pre, 0)
 
-            # Encode groundtruth labels and bboxes.
-            gclasses, glocalisations, gscores = \
-                ssd_net.bboxes_encode(glabels, gbboxes, ssd_anchors)
-            batch_shape = [1] * 5 + [len(ssd_anchors)] * 3
+            from nets import ssd_vgg_300
 
-            # Evaluation batch.
-            r = tf.train.batch(
-                tf_utils.reshape_list([image, glabels, gbboxes, gdifficults, gbbox_img,
-                                       gclasses, glocalisations, gscores]),
-                batch_size=FLAGS.batch_size,
-                num_threads=FLAGS.num_preprocessing_threads,
-                capacity=5 * FLAGS.batch_size,
-                dynamic_pad=True)
-            (b_image, b_glabels, b_gbboxes, b_gdifficults, b_gbbox_img, b_gclasses,
-             b_glocalisations, b_gscores) = tf_utils.reshape_list(r, batch_shape)
+            ssd_net = ssd_vgg_300.SSDNet()
+            with slim.arg_scope(ssd_net.arg_scope(data_format=data_format)):
+                rpredictions, rlocalisations, _, _ = ssd_net.net(image_4d, is_training=False, reuse=tf.AUTO_REUSE)
+            print('yes')
+            ckpt_filename = 'checkpoints/ssd_300_vgg.ckpt'
+            isess.run(tf.global_variables_initializer())
+            saver = tf.train.Saver()
+            saver.restore(isess, ckpt_filename)
 
-        # =================================================================== #
-        # SSD Network + Ouputs decoding.
-        # =================================================================== #
-        dict_metrics = {}
-        arg_scope = ssd_net.arg_scope(data_format=DATA_FORMAT)
-        with slim.arg_scope(arg_scope):
-            predictions, localisations, logits, end_points = \
-                ssd_net.net(b_image, is_training=False)
+            ssd_anchors = ssd_net.anchors(net_shape)
+            bbox_img = gbbox_img
 
-        # Add losses functions.
-        ssd_net.losses(logits, localisations,
-                       b_gclasses, b_glocalisations, b_gscores)
+            select_threshold = 0.5
+            nms_threshold = .45
+            net_shape = (300, 300)
+            # Run SSD network.
 
-        # Performing post-processing on CPU: loop-intensive, usually more efficient.
-        with tf.device('/device:CPU:0'):
-            # Detected objects from SSD output.
-            rscores, rbboxes = tf.py_func(py_postprocess, [predictions, localisations, ssd_anchors, net_shape, gbbox_img], [tf.float32])
+            rbbox_img = gbbox_img
 
-            # Compute TP and FP statistics.
-            num_gbboxes, tp, fp, rscores = \
-                tfe.bboxes_matching_batch(rscores.keys(), rscores, rbboxes,
-                                          b_glabels, b_gbboxes, b_gdifficults,
-                                          matching_threshold=FLAGS.matching_threshold)
+            print(image_4d)
+            # rimg, rpredictions, rlocalisations, rbbox_img = isess.run([image_4d, rpredictions, rlocalisations, gbbox_img])
+            # rclasses, rscores, rbboxes = np_methods.ssd_bboxes_select(
+            #     rpredictions, rlocalisations, ssd_anchors,
+            #     select_threshold=select_threshold, img_shape=net_shape, num_classes=21, decode=True)
+            #
+            #
+            # rbboxes = np_methods.bboxes_clip(rbbox_img, rbboxes)
+            # rclasses, rscores, rbboxes = np_methods.bboxes_sort(rclasses, rscores, rbboxes, top_k=400)
+            # rclasses, rscores, rbboxes = np_methods.bboxes_nms(rclasses, rscores, rbboxes, nms_threshold=nms_threshold)
+            # # Resize bboxes to original image shape. Note: useless for Resize.WARP!
+            # rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
 
-        # Variables to restore: moving avg. or normal weights.
-        if FLAGS.moving_average_decay:
-            variable_averages = tf.train.ExponentialMovingAverage(
-                FLAGS.moving_average_decay, tf_global_step)
-            variables_to_restore = variable_averages.variables_to_restore(
-                slim.get_model_variables())
-            variables_to_restore[tf_global_step.op.name] = tf_global_step
-        else:
-            variables_to_restore = slim.get_variables_to_restore()
 
-        # =================================================================== #
-        # Evaluation metrics.
-        # =================================================================== #
-        with tf.device('/device:CPU:0'):
-            dict_metrics = {}
-            # First add all losses.
-            for loss in tf.get_collection(tf.GraphKeys.LOSSES):
-                dict_metrics[loss.op.name] = slim.metrics.streaming_mean(loss)
-            # Extra losses as well.
-            for loss in tf.get_collection('EXTRA_LOSSES'):
-                dict_metrics[loss.op.name] = slim.metrics.streaming_mean(loss)
 
-            # Add metrics to summaries and Print on screen.
-            for name, metric in dict_metrics.items():
-                # summary_name = 'eval/%s' % name
-                summary_name = name
-                op = tf.summary.scalar(summary_name, metric[0], collections=[])
-                # op = tf.Print(op, [metric[0]], summary_name)
-                tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-
-            # FP and TP metrics.
-            tp_fp_metric = tfe.streaming_tp_fp_arrays(num_gbboxes, tp, fp, rscores)
-            for c in tp_fp_metric[0].keys():
-                dict_metrics['tp_fp_%s' % c] = (tp_fp_metric[0][c],
-                                                tp_fp_metric[1][c])
-
-            # Add to summaries precision/recall values.
-            aps_voc07 = {}
-            aps_voc12 = {}
-            for c in tp_fp_metric[0].keys():
-                # Precison and recall values.
-                prec, rec = tfe.precision_recall(*tp_fp_metric[0][c])
-
-                # Average precision VOC07.
-                v = tfe.average_precision_voc07(prec, rec)
-                summary_name = 'AP_VOC07/%s' % c
-                op = tf.summary.scalar(summary_name, v, collections=[])
-                # op = tf.Print(op, [v], summary_name)
-                tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-                aps_voc07[c] = v
-
-                # Average precision VOC12.
-                v = tfe.average_precision_voc12(prec, rec)
-                summary_name = 'AP_VOC12/%s' % c
-                op = tf.summary.scalar(summary_name, v, collections=[])
-                # op = tf.Print(op, [v], summary_name)
-                tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-                aps_voc12[c] = v
-
-            # Mean average precision VOC07.
-            summary_name = 'AP_VOC07/mAP'
-            mAP = tf.add_n(list(aps_voc07.values())) / len(aps_voc07)
-            op = tf.summary.scalar(summary_name, mAP, collections=[])
-            op = tf.Print(op, [mAP], summary_name)
-            tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-
-            # Mean average precision VOC12.
-            summary_name = 'AP_VOC12/mAP'
-            mAP = tf.add_n(list(aps_voc12.values())) / len(aps_voc12)
-            op = tf.summary.scalar(summary_name, mAP, collections=[])
-            op = tf.Print(op, [mAP], summary_name)
-            tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-
-        # for i, v in enumerate(l_precisions):
-        #     summary_name = 'eval/precision_at_recall_%.2f' % LIST_RECALLS[i]
-        #     op = tf.summary.scalar(summary_name, v, collections=[])
-        #     op = tf.Print(op, [v], summary_name)
-        #     tf.add_to_collection(tf.GraphKeys.SUMMARIES, op)
-
-        # Split into values and updates ops.
-        names_to_values, names_to_updates = slim.metrics.aggregate_metric_map(dict_metrics)
-
-        # =================================================================== #
-        # Evaluation loop.
-        # =================================================================== #
-        gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
-        config = tf.ConfigProto(log_device_placement=False, gpu_options=gpu_options)
-        # config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
-
-        # Number of batches...
-        if FLAGS.max_num_batches:
-            num_batches = FLAGS.max_num_batches
-        else:
-            num_batches = math.ceil(dataset.num_samples / float(FLAGS.batch_size))
-
-        def flatten(x):
-            result = []
-            for el in x:
-                if isinstance(el, tuple):
-                    result.extend(flatten(el))
-                else:
-                    result.append(el)
-            return result
-
-        if not FLAGS.wait_for_checkpoints:
-            if tf.gfile.IsDirectory(FLAGS.checkpoint_path):
-                checkpoint_path = tf.train.latest_checkpoint(FLAGS.checkpoint_path)
-            else:
-                checkpoint_path = FLAGS.checkpoint_path
-            tf.logging.info('Evaluating %s' % checkpoint_path)
-
-            def flatten(seq):
-                l = []
-
-                for elt in seq:
-                    t = type(elt)
-                    if t is tuple or t is list:
-                        for elt2 in flatten(elt):
-                            l.append(elt2)
-                    else:
-                        l.append(elt)
-                return l
-
-            # Standard evaluation loop.
-            start = time.time()
-            slim.evaluation.evaluate_once(
-                master=FLAGS.master,
-                checkpoint_path=checkpoint_path,
-                logdir=FLAGS.eval_dir,
-                num_evals=num_batches,
-                eval_op=flatten(list(names_to_updates.values())),
-                variables_to_restore=variables_to_restore,
-                session_config=config)
-            # Log time spent.
-            elapsed = time.time()
-            elapsed = elapsed - start
-            print('Time spent : %.3f seconds.' % elapsed)
-            print('Time spent per BATCH: %.3f seconds.' % (elapsed / num_batches))
-
-        else:
-            checkpoint_path = FLAGS.checkpoint_path
-            tf.logging.info('Evaluating %s' % checkpoint_path)
-
-            # Waiting loop.
-            slim.evaluation.evaluation_loop(
-                master=FLAGS.master,
-                checkpoint_dir=checkpoint_path,
-                logdir=FLAGS.eval_dir,
-                num_evals=num_batches,
-                eval_op=flatten(list(names_to_updates.values())),
-                variables_to_restore=variables_to_restore,
-                eval_interval_secs=60,
-                max_number_of_evaluations=np.inf,
-                session_config=config,
-                timeout=None)
+def np_ssd_bboxes_select(rpredictions, rlocalisations, net_shape):
+    return np_methods.ssd_bboxes_select(rpredictions, rlocalisations, ssd_anchors,
+                                        select_threshold=FLAGS.select_threshold, img_shape=net_shape, num_classes=21,
+                                        decode=True)
 
 
 def py_postprocess(rpredictions, rlocalisations, ssd_anchors, net_shape, rbbox_img):
@@ -371,6 +227,7 @@ def py_postprocess(rpredictions, rlocalisations, ssd_anchors, net_shape, rbbox_i
     rbboxes = np_methods.bboxes_resize(rbbox_img, rbboxes)
 
     return rscores, rbboxes
+
 
 if __name__ == '__main__':
     tf.app.run()
